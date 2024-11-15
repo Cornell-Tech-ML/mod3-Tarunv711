@@ -353,35 +353,34 @@ def tensor_reduce(
         out_pos = cuda.blockIdx.x
         pos = cuda.threadIdx.x
 
-        # TODO: Implement for Task 3.3.
-        # Handle case where thread is out of bounds
+        # TODO: Implement for Task 3.3
         if out_pos >= out_size:
             return
+        s = a_shape[reduce_dim]
 
-        # Calculate position in output
         to_index(out_pos, out_shape, out_index)
-
-        # Initialize reduction with first element
-        cache[pos] = reduce_value
-
-        # Pre-calculate input index array to avoid repeated allocations
+        out_index[reduce_dim] = pos
         a_index = cuda.local.array(MAX_DIMS, numba.int32)
         for i in range(len(out_shape)):
-            a_index[i] = out_index[i]
-
-        # Loop over reduction dimension
-        for k in range(a_shape[reduce_dim]):
-            # Update only the reduction dimension index
-            a_index[reduce_dim] = k
-            in_pos = index_to_position(a_index, a_strides)
-            cache[pos] = fn(cache[pos], a_storage[in_pos])
-
+            a_index[i] = out_index[i]  
+        if pos < s:
+            j = index_to_position(out_index, a_strides)
+            cache[pos] = a_storage[j]
+        else:
+            cache[pos] = reduce_value
         cuda.syncthreads()
 
-        # Write final reduced value to output
-        out[index_to_position(out_index, out_strides)] = cache[pos]
+        stri = BLOCK_DIM // 2
+        while stri > 0:
+            if pos < stri:
+                cache[pos] = fn(cache[pos], cache[pos + stri])
+            cuda.syncthreads()
+            stri //= 2
+        
+        if pos == 0:
+            out[out_pos] = cache[0]
 
-    return jit(_reduce)
+    return jit(_reduce)  # type: ignore
 
 
 def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
