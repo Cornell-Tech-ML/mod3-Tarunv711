@@ -320,7 +320,7 @@ def test_two_grad_broadcast(
 
     grad_check(tensor_fn, t1, t2)
 
-    # broadcast check
+    # broadcast check iowjeiqwjieojqwjoijio
     grad_check(tensor_fn, t1.sum(0), t2)
     grad_check(tensor_fn, t1, t2.sum(0))
 

@@ -29,24 +29,13 @@ FakeCUDAKernel = Any
 Fn = TypeVar("Fn")
 
 
-def device_jit(fn: Fn, **kwargs) -> Fn:
-    """CUDA device jit decorator."""
+def device_jit(fn: Fn, **kwargs: Any) -> Fn:
+    """Compile a function for execution on the CUDA device."""
     return _jit(device=True, **kwargs)(fn)  # type: ignore
 
 
-def jit(fn, **kwargs) -> FakeCUDAKernel:
-    """CUDA jit decorator.
-
-    Args:
-    ----
-        fn (Fn): function to decorate.
-        **kwargs: keyword arguments for numba.jit.
-
-    Returns:
-    -------
-        Fn: decorated function.
-
-    """
+def jit(fn: Fn, **kwargs: Any) -> FakeCUDAKernel:
+    """Just-in-time compile a function using Numba's JIT."""
     return _jit(**kwargs)(fn)  # type: ignore
 
 
@@ -80,6 +69,7 @@ class CudaOps(TensorOps):
 
     @staticmethod
     def zip(fn: Callable[[float, float], float]) -> Callable[[Tensor, Tensor], Tensor]:
+        """Apply a function to pairs of elements from two tensors and return a new tensor."""
         cufn: Callable[[float, float], float] = device_jit(fn)
         f = tensor_zip(cufn)
 
@@ -101,6 +91,20 @@ class CudaOps(TensorOps):
     ) -> Callable[[Tensor, int], Tensor]:
         cufn: Callable[[float, float], float] = device_jit(fn)
         f = tensor_reduce(cufn)
+        """Apply a reduction function to a tensor along a dimension.
+
+        Args:
+        ----
+            fn: Callable[[float, float], float]
+                The reduction function to apply
+            start: float
+                The starting value for the reduction
+
+        Returns:
+        -------
+            Callable[[Tensor, int], Tensor]
+                A function that takes a tensor and dimension and returns a new reduced tensor
+        """
 
         def ret(a: Tensor, dim: int) -> Tensor:
             out_shape = list(a.shape)
@@ -186,13 +190,12 @@ def tensor_map(
         out_index = cuda.local.array(MAX_DIMS, numba.int32)
         in_index = cuda.local.array(MAX_DIMS, numba.int32)
         i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
-        # TODO: Implement for Task 3.3.
         if i < out_size:
             to_index(i, out_shape, out_index)
             broadcast_index(out_index, out_shape, in_shape, in_index)
-            out[index_to_position(out_index, out_strides)] = fn(
-                in_storage[index_to_position(in_index, in_strides)]
-            )
+            out_pos = index_to_position(out_index, out_strides)
+            out[out_pos] = fn(in_storage[index_to_position(in_index, in_strides)])
+
 
     return cuda.jit()(_map)  # type: ignore
 
@@ -234,21 +237,21 @@ def tensor_zip(
         b_index = cuda.local.array(MAX_DIMS, numba.int32)
         i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
 
-        # TODO: Implement for Task 3.3.
         if i < out_size:
             to_index(i, out_shape, out_index)
             broadcast_index(out_index, out_shape, a_shape, a_index)
             broadcast_index(out_index, out_shape, b_shape, b_index)
-            out[index_to_position(out_index, out_strides)] = fn(
-                a_storage[index_to_position(a_index, a_strides)],
-                b_storage[index_to_position(b_index, b_strides)],
-            )
+            out_pos =  index_to_position(out_index,out_strides)
+            a_pos = index_to_position(a_index, a_strides)
+            b_pos = index_to_position(b_index,b_strides)
+
+            out[out_pos] = fn(a_storage[a_pos], b_storage[b_pos])
 
     return cuda.jit()(_zip)  # type: ignore
 
 
 def _sum_practice(out: Storage, a: Storage, size: int) -> None:
-    r"""Function this is a practice sum kernel to prepare for reduce.
+    r"""Practice sum kernel to prepare for reduce.
 
     Given an array of length $n$ and out of size $n // \text{blockDIM}$
     it should sum up each blockDim values into an out cell.
@@ -269,23 +272,18 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
 
     """
     BLOCK_DIM = 32
-
     cache = cuda.shared.array(BLOCK_DIM, numba.float64)
     i = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
     pos = cuda.threadIdx.x
 
-    # TODO: Implement for Task 3.3.
-    if i >= size:
-        cache[pos] = 0
-    else:
-        cache[pos] = a[i]
-
+    # Load data into shared memory
+    cache[pos] = a[i] if i < size else 0.0
     cuda.syncthreads()
 
     # Parallel reduction in shared memory
     s = BLOCK_DIM // 2
-    while s >= 1:
-        if pos < s:
+    while s > 0:
+        if pos < s and i + s < size:
             cache[pos] += cache[pos + s]
         cuda.syncthreads()
         s //= 2
@@ -293,21 +291,22 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
     # Write result for this block to global memory
     if pos == 0:
         out[cuda.blockIdx.x] = cache[0]
+        
+        
+
 
 
 jit_sum_practice = cuda.jit()(_sum_practice)
 
 
 def sum_practice(a: Tensor) -> TensorData:
-    """Function this is a practice sum kernel to prepare for reduce.
+    """Calculate the sum of elements in a tensor.
 
     Args:
-    ----
-        a (Tensor): tensor to sum.
+        a (Tensor): The input tensor to sum.
 
     Returns:
-    -------
-        TensorData: summed tensor.
+        TensorData: A tensor containing the sum of the input tensor.
 
     """
     (size,) = a.shape
@@ -350,33 +349,50 @@ def tensor_reduce(
         BLOCK_DIM = 1024
         cache = cuda.shared.array(BLOCK_DIM, numba.float64)
         out_index = cuda.local.array(MAX_DIMS, numba.int32)
-        out_pos = cuda.blockIdx.x
-        pos = cuda.threadIdx.x
-
-        # TODO: Implement for Task 3.3.
-        s = a_shape[reduce_dim]
-
-        to_index(out_pos, out_shape, out_index)
-        out_index[reduce_dim] = pos  
-        if pos < s:
-            j = index_to_position(out_index, a_strides)
-            cache[pos] = a_storage[j]
-        else:
-            cache[pos] = reduce_value
-        cuda.syncthreads()
-
-        stri = BLOCK_DIM // 2
-        while stri > 0:
-            if pos < stri:
-                cache[pos] = fn(cache[pos], cache[pos + stri])
-            cuda.syncthreads()
-            stri //= 2
+        in_index = cuda.local.array(MAX_DIMS, numba.int32)
         
-        if pos == 0:
+        # Calculate position
+        tid = cuda.threadIdx.x
+        bid = cuda.blockIdx.x
+        
+        # Convert the block index into an index in the output
+        to_index(bid, out_shape, out_index)
+        
+        # Calculate the reduction size for this dimension
+        reduce_size = a_shape[reduce_dim]
+        
+        # Initialize reduction
+        local_sum = reduce_value
+        
+        # Copy out_index to in_index
+        for i in range(len(out_index)):
+            in_index[i] = out_index[i]
+            
+        # Each thread reduces multiple elements
+        for j in range(tid, reduce_size, BLOCK_DIM):
+            in_index[reduce_dim] = j
+            pos = index_to_position(in_index, a_strides)
+            val = a_storage[pos]
+            local_sum = fn(local_sum, val)
+            
+        # Load partial sum into shared memory
+        cache[tid] = local_sum
+        cuda.syncthreads()
+        
+        # Reduce within block
+        s = BLOCK_DIM // 2
+        while s > 0:
+            if tid < s:
+                cache[tid] = fn(cache[tid], cache[tid + s])
+            cuda.syncthreads()
+            s //= 2
+            
+        # Write result
+        if tid == 0:
+            out_pos = index_to_position(out_index, out_strides)
             out[out_pos] = cache[0]
 
     return jit(_reduce)  # type: ignore
-
 
 def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
     """Function this is a practice square MM kernel to prepare for matmul.
