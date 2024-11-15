@@ -54,7 +54,7 @@ to_index = device_jit(to_index)
 index_to_position = device_jit(index_to_position)
 broadcast_index = device_jit(broadcast_index)
 
-THREADS_PER_BLOCK = 16
+THREADS_PER_BLOCK = 32
 
 
 class CudaOps(TensorOps):
