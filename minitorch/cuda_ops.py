@@ -285,7 +285,7 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
     # Parallel reduction in shared memory
     s = BLOCK_DIM // 2
     while s >= 1:
-        //if i + s < size and pos < s:
+        if pos < s:
             cache[pos] += cache[pos + s]
         cuda.syncthreads()
         s //= 2
