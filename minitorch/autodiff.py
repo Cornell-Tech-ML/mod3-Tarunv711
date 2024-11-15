@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Tuple, Protocol, List
+from typing import Any, Iterable, List, Tuple, Protocol
 
 
 # ## Task 1.1
@@ -25,12 +25,12 @@ def central_difference(f: Any, *vals: Any, arg: int = 0, epsilon: float = 1e-6) 
         An approximation of $f'_i(x_0, \ldots, x_{n-1})$
 
     """
-    vals_list = list(vals)
-    vals_list[arg] += epsilon
-    f_plus = f(*vals_list)
-    vals_list[arg] -= 2 * epsilon
-    f_minus = f(*vals_list)
-    return (f_plus - f_minus) / (2 * epsilon)
+    vals1 = [v for v in vals]
+    vals2 = [v for v in vals]
+    vals1[arg] += epsilon
+    vals2[arg] -= epsilon
+    delta = f(*vals1) - f(*vals2)
+    return delta / (2 * epsilon)
 
 
 variable_count = 1
@@ -38,29 +38,29 @@ variable_count = 1
 
 class Variable(Protocol):
     def accumulate_derivative(self, x: Any) -> None:
-        """Accumulates the derivative of the variable."""
+        """Accumulate the derivative of the variable"""
         ...
 
     @property
     def unique_id(self) -> int:
-        """Returns the unique identifier of the variable."""
+        """Unique identifier for the variable"""
         ...
 
     def is_leaf(self) -> bool:
-        """Returns True if the variable is a leaf."""
+        """True if this variable is a leaf"""
         ...
 
     def is_constant(self) -> bool:
-        """Returns True if the variable is a constant."""
+        """True if this variable was created by an operation on constants"""
         ...
 
     @property
     def parents(self) -> Iterable["Variable"]:
-        """Returns the parents of the variable."""
+        """Parents of the variable"""
         ...
 
     def chain_rule(self, d_output: Any) -> Iterable[Tuple[Variable, Any]]:
-        """Applies the chain rule to compute the derivatives of the inputs."""
+        """Chain rule for the variable"""
         ...
 
 
@@ -76,47 +76,51 @@ def topological_sort(variable: Variable) -> Iterable[Variable]:
         Non-constant Variables in topological order starting from the right.
 
     """
-    visited = set()
-    partial_order: List[Variable] = []
+    order: List[Variable] = []
+    seen = set()
 
-    def dfs(v: Variable) -> None:
-        if v.unique_id in visited or v.is_constant():
+    def visit(var: Variable) -> None:
+        if var.unique_id in seen or var.is_constant():
             return
-        visited.add(v.unique_id)
-        for parent in v.parents:
-            if not parent.is_constant():
-                dfs(parent)
-        partial_order.append(v)
+        if not var.is_leaf():
+            for m in var.parents:
+                visit(m)
+        seen.add(var.unique_id)
+        order.insert(0, var)
 
-    dfs(variable)
-    return reversed(partial_order)
+    visit(variable)
+    return order
 
 
 def backpropagate(variable: Variable, deriv: Any) -> None:
-    """Runs backpropagation on the computation graph to compute derivatives for the leaf nodes.
+    """Runs backpropagation on the computation graph in order to
+    compute derivatives for the leave nodes.
 
     Args:
     ----
-        variable: The right-most variable.
-        deriv: The derivative we want to propagate backward to the leaves.
+        variable: The right-most variable
+        deriv  : Its derivative that we want to propagate backward to the leaves.
 
     Returns:
     -------
-    None: Updates the derivative values of each leaf through accumulate_derivative`.
+        None. Should write to its results to the derivative values of each leaf through `accumulate_derivative`.
 
     """
-    ordered_vars = topological_sort(variable)
-    derivatives = {variable.unique_id: deriv}
+    queue = topological_sort(variable)
+    derivatives = {}
+    derivatives[variable.unique_id] = deriv
 
-    for var in ordered_vars:
+    for var in queue:
+        deriv = derivatives[var.unique_id]
+
         if var.is_leaf():
-            var.accumulate_derivative(derivatives[var.unique_id])
+            var.accumulate_derivative(deriv)
         else:
-            for parent, local_deriv in var.chain_rule(derivatives[var.unique_id]):
-                if parent.unique_id not in derivatives:
-                    derivatives[parent.unique_id] = local_deriv
-                else:
-                    derivatives[parent.unique_id] += local_deriv
+            for v, d in var.chain_rule(deriv):
+                if v.is_constant():
+                    continue
+                derivatives.setdefault(v.unique_id, 0.0)
+                derivatives[v.unique_id] += d
 
 
 @dataclass
@@ -134,5 +138,5 @@ class Context:
 
     @property
     def saved_tensors(self) -> Tuple[Any, ...]:
-        """Returns the saved values."""
+        """Saved tensors"""
         return self.saved_values
