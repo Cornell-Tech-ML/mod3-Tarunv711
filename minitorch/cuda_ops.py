@@ -353,38 +353,30 @@ def tensor_reduce(
         out_pos = cuda.blockIdx.x
         pos = cuda.threadIdx.x
 
-        # Calculate the starting position for this output
+        # TODO: Implement for Task 3.3.
+        s = a_shape[reduce_dim]
+
         to_index(out_pos, out_shape, out_index)
-        
-        # Calculate number of elements being reduced
-        reduce_size = a_shape[reduce_dim]
-        
-        # Initialize shared memory
-        cache[pos] = reduce_value
-        
-        # Loop over elements being reduced
-        for idx in range(pos, reduce_size, BLOCK_DIM):
-            out_index[reduce_dim] = idx
-            in_pos = index_to_position(out_index, a_strides)
-            cache[pos] = fn(cache[pos], a_storage[in_pos])
-            
+        out_index[reduce_dim] = pos  
+        if pos < s:
+            j = index_to_position(out_index, a_strides)
+            cache[pos] = a_storage[j]
+        else:
+            cache[pos] = reduce_value
         cuda.syncthreads()
-        
-        # Reduce within block
-        stride = BLOCK_DIM // 2
-        while stride > 0:
-            if pos < stride:
-                cache[pos] = fn(cache[pos], cache[pos + stride])
+
+        stri = BLOCK_DIM // 2
+        while stri > 0:
+            if pos < stri:
+                cache[pos] = fn(cache[pos], cache[pos + stri])
             cuda.syncthreads()
-            stride //= 2
-            
-        # Write final result
+            stri //= 2
+        
         if pos == 0:
-            out_index[reduce_dim] = 0
-            out_pos = index_to_position(out_index, out_strides)
             out[out_pos] = cache[0]
 
     return jit(_reduce)  # type: ignore
+
 
 def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
     """Function this is a practice square MM kernel to prepare for matmul.
