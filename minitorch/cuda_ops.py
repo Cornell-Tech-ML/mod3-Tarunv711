@@ -239,7 +239,7 @@ def tensor_zip(
             to_index(i, out_shape, out_index)
             broadcast_index(out_index, out_shape, a_shape, a_index)
             broadcast_index(out_index, out_shape, b_shape, b_index)
-            out[i] = fn(
+            out[index_to_position(out_index, out_strides)] = fn(
                 a_storage[index_to_position(a_index, a_strides)],
                 b_storage[index_to_position(b_index, b_strides)],
             )
@@ -354,28 +354,34 @@ def tensor_reduce(
         pos = cuda.threadIdx.x
 
         # TODO: Implement for Task 3.3.
-        s = a_shape[reduce_dim]
+        # Handle case where thread is out of bounds
+        if out_pos >= out_size:
+            return
 
+        # Calculate position in output
         to_index(out_pos, out_shape, out_index)
-        out_index[reduce_dim] = pos  
-        if pos < s:
-            j = index_to_position(out_index, a_strides)
-            cache[pos] = a_storage[j]
-        else:
-            cache[pos] = reduce_value
+
+        # Initialize reduction with first element
+        cache[pos] = reduce_value
+
+        # Pre-calculate input index array to avoid repeated allocations
+        a_index = cuda.local.array(MAX_DIMS, numba.int32)
+        for i in range(len(out_shape)):
+            a_index[i] = out_index[i]
+
+        # Loop over reduction dimension
+        for k in range(a_shape[reduce_dim]):
+            # Update only the reduction dimension index
+            a_index[reduce_dim] = k
+            in_pos = index_to_position(a_index, a_strides)
+            cache[pos] = fn(cache[pos], a_storage[in_pos])
+
         cuda.syncthreads()
 
-        stri = BLOCK_DIM // 2
-        while stri > 0:
-            if pos < stri:
-                cache[pos] = fn(cache[pos], cache[pos + stri])
-            cuda.syncthreads()
-            stri //= 2
-        
-        if pos == 0:
-            out[out_pos] = cache[0]
+        # Write final reduced value to output
+        out[index_to_position(out_index, out_strides)] = cache[pos]
 
-    return jit(_reduce)  # type: ignore
+    return jit(_reduce)
 
 
 def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
