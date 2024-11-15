@@ -276,7 +276,7 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
 
     # TODO: Implement for Task 3.3.
     if i >= size:
-        cache[pos] = 0
+        cache[pos] = 0.0
     else:
         cache[pos] = a[i]
 
