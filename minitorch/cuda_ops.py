@@ -30,12 +30,12 @@ Fn = TypeVar("Fn")
 
 
 def device_jit(fn: Fn, **kwargs) -> Fn:
-    """CUDA device jit decorator."""
+    """Numba device jit decorator."""
     return _jit(device=True, **kwargs)(fn)  # type: ignore
 
 
 def jit(fn, **kwargs) -> FakeCUDAKernel:
-    """CUDA jit decorator.
+    """Numba jit decorator.
 
     Args:
     ----
@@ -62,7 +62,16 @@ class CudaOps(TensorOps):
 
     @staticmethod
     def map(fn: Callable[[float], float]) -> MapProto:
-        """See `tensor_ops.py`"""
+        """Apply a function to each element of a tensor using CUDA.
+
+        Args:
+            fn: function mapping a float to one float
+
+        Returns:
+        -------
+            Function that applies fn to each element of a tensor
+
+        """
         cufn: Callable[[float], float] = device_jit(fn)
         f = tensor_map(cufn)
 
@@ -80,6 +89,16 @@ class CudaOps(TensorOps):
 
     @staticmethod
     def zip(fn: Callable[[float, float], float]) -> Callable[[Tensor, Tensor], Tensor]:
+        """Apply a function to pairs of elements from two tensors using CUDA.
+
+        Args:
+            fn: function mapping two floats to one float
+
+        Returns:
+        -------
+            Function that applies fn to pairs of elements from two tensors
+
+        """
         cufn: Callable[[float, float], float] = device_jit(fn)
         f = tensor_zip(cufn)
 
@@ -99,6 +118,17 @@ class CudaOps(TensorOps):
     def reduce(
         fn: Callable[[float, float], float], start: float = 0.0
     ) -> Callable[[Tensor, int], Tensor]:
+        """Apply reduce function along a dimension of a tensor using CUDA.
+
+        Args:
+            fn: reduction function mapping two floats to one float
+            start: starting value for reduction
+
+        Returns:
+        -------
+            Function that reduces a tensor along a dimension
+
+        """
         cufn: Callable[[float, float], float] = device_jit(fn)
         f = tensor_reduce(cufn)
 
@@ -119,6 +149,17 @@ class CudaOps(TensorOps):
 
     @staticmethod
     def matrix_multiply(a: Tensor, b: Tensor) -> Tensor:
+        """Compute matrix multiplication of two tensors on CUDA.
+
+        Args:
+            a (Tensor): First tensor
+            b (Tensor): Second tensor
+
+        Returns:
+        -------
+            Tensor: Result of matrix multiplication
+
+        """
         # Make these always be a 3 dimensional multiply
         both_2d = 0
         if len(a.shape) == 2:
