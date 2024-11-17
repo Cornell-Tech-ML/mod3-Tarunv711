@@ -29,12 +29,12 @@ FakeCUDAKernel = Any
 Fn = TypeVar("Fn")
 
 
-def device_jit(fn: Fn, **kwargs) -> Fn:
+def device_jit(fn: Fn, **kwargs: Any) -> Fn:
     """Numba device jit decorator."""
     return _jit(device=True, **kwargs)(fn)  # type: ignore
 
 
-def jit(fn, **kwargs) -> FakeCUDAKernel:
+def jit(fn: Fn, **kwargs: Any) -> FakeCUDAKernel:
     """Numba jit decorator.
 
     Args:
@@ -65,6 +65,7 @@ class CudaOps(TensorOps):
         """Apply a function to each element of a tensor using CUDA.
 
         Args:
+        ----
             fn: function mapping a float to one float
 
         Returns:
@@ -92,6 +93,7 @@ class CudaOps(TensorOps):
         """Apply a function to pairs of elements from two tensors using CUDA.
 
         Args:
+        ----
             fn: function mapping two floats to one float
 
         Returns:
@@ -121,6 +123,7 @@ class CudaOps(TensorOps):
         """Apply reduce function along a dimension of a tensor using CUDA.
 
         Args:
+        ----
             fn: reduction function mapping two floats to one float
             start: starting value for reduction
 
@@ -152,6 +155,7 @@ class CudaOps(TensorOps):
         """Compute matrix multiplication of two tensors on CUDA.
 
         Args:
+        ----
             a (Tensor): First tensor
             b (Tensor): Second tensor
 
@@ -403,7 +407,7 @@ def tensor_reduce(
         out_index[reduce_dim] = pos
         a_index = cuda.local.array(MAX_DIMS, numba.int32)
         for i in range(len(out_shape)):
-            a_index[i] = out_index[i]  
+            a_index[i] = out_index[i]
         if pos < s:
             j = index_to_position(out_index, a_strides)
             cache[pos] = a_storage[j]
@@ -417,7 +421,7 @@ def tensor_reduce(
                 cache[pos] = fn(cache[pos], cache[pos + stri])
             cuda.syncthreads()
             stri //= 2
-        
+
         if pos == 0:
             out[out_pos] = cache[0]
 
@@ -512,7 +516,6 @@ def mm_practice(a: Tensor, b: Tensor) -> TensorData:
     return out
 
 
-
 def _tensor_matrix_multiply(
     out: Storage,
     out_shape: Shape,
@@ -544,7 +547,7 @@ def _tensor_matrix_multiply(
     # Get batch strides, 0 if not batched
     a_batch_stride = a_strides[0] if a_shape[0] > 1 else 0
     b_batch_stride = b_strides[0] if b_shape[0] > 1 else 0
-    
+
     # Get current batch index
     batch = cuda.blockIdx.z
 
@@ -574,18 +577,18 @@ def _tensor_matrix_multiply(
         # Load a tile from a into shared memory
         if i < a_shape[-2] and (k_start + pj) < a_shape[-1]:
             a_pos = (
-                batch * a_batch_stride +
-                i * a_strides[-2] +
-                (k_start + pj) * a_strides[-1]
+                batch * a_batch_stride
+                + i * a_strides[-2]
+                + (k_start + pj) * a_strides[-1]
             )
             a_shared[pi, pj] = a_storage[a_pos]
 
-        # Load a tile from b into shared memory  
+        # Load a tile from b into shared memory
         if (k_start + pi) < b_shape[-2] and j < b_shape[-1]:
             b_pos = (
-                batch * b_batch_stride +
-                (k_start + pi) * b_strides[-2] +
-                j * b_strides[-1]
+                batch * b_batch_stride
+                + (k_start + pi) * b_strides[-2]
+                + j * b_strides[-1]
             )
             b_shared[pi, pj] = b_storage[b_pos]
 
@@ -600,11 +603,7 @@ def _tensor_matrix_multiply(
 
     # Write final result to global memory
     if i < a_shape[-2] and j < b_shape[-1]:
-        out_pos = (
-            batch * out_strides[0] +
-            i * out_strides[-2] +
-            j * out_strides[-1]
-        )
+        out_pos = batch * out_strides[0] + i * out_strides[-2] + j * out_strides[-1]
         out[out_pos] = acc
 
 
